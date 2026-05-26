@@ -1,0 +1,77 @@
+name: Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: '${{ github.workspace }}/go.mod'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android Build Tools
+        run: |
+          sdkmanager "build-tools;34.0.0" "platforms;android-34" "ndk;25.2.9519653"
+
+      - name: Generate debug keystore
+        run: |
+          keytool -genkeypair \
+            -keystore debug.keystore \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Create keystore.properties
+        working-directory: Android
+        run: |
+          cat > keystore.properties <<EOF
+          keyAlias=androiddebugkey
+          keyPassword=android
+          storeFile=${{ github.workspace }}/debug.keystore
+          storePassword=android
+          EOF
+
+      - name: Grant execute permission for gradlew
+        working-directory: Android
+        run: chmod +x gradlew
+
+      - name: Build release APK
+        working-directory: Android
+        run: ./gradlew assembleRelease
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: intra-release-${{ github.sha }}
+          path: Android/app/build/outputs/apk/release/*.apk
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Android/app/build/outputs/apk/release/*.apk
+          generate_release_notes: true
